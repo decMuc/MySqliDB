@@ -216,9 +216,9 @@ class MysqliDb
     /**
      * Variables for query execution tracing
      */
-    protected $traceStartQ;
-    protected $traceEnabled;
-    protected $traceStripPrefix;
+    protected $traceStartQ = 0;
+    protected $traceEnabled = false;
+    protected $traceStripPrefix = '';
     public $trace = array();
 
     /**
@@ -556,7 +556,13 @@ class MysqliDb
         preg_match_all("/(from|into|update|join|describe) [\\'\\´]?([a-zA-Z0-9_-]+)[\\'\\´]?/i", $query, $matches);
         list($from_table, $from, $table) = $matches;
 
+        // Check if there are matches
+        // https://github.com/ThingEngineer/PHP-MySQLi-Database-Class/pull/1021/commits/2f5d7f2b0ede67973ae2631ff04b0b89cd48a07c
+        if (empty($table[0]))
+            return $query;
+
         return str_replace($table[0], self::$prefix.$table[0], $query);
+
     }
 
     /**
@@ -790,11 +796,11 @@ class MysqliDb
     /**
      * A convenient SELECT COLUMN function to get a single column value from one row
      *
-     * @param string $tableName The name of the database table to work with.
-     * @param string $column    The desired column
-     * @param int    $limit     Limit of rows to select. Use null for unlimited..1 by default
+     * @param string    $tableName The name of the database table to work with.
+     * @param string    $column    The desired column
+     * @param int|null  $limit     Limit of rows to select. Use null for unlimited..1 by default
      *
-     * @return mixed Contains the value of a returned column / array of values
+     * @return mixed    Contains the value of a returned column / array of values
      * @throws Exception
      */
     public function getValue($tableName, $column, $limit = 1)
@@ -946,7 +952,9 @@ class MysqliDb
     public function delete($tableName, $numRows = null)
     {
         if ($this->isSubQuery) {
-            return;
+            // return;
+            // https://github.com/ThingEngineer/PHP-MySQLi-Database-Class/pull/1017/commits/f04c83312456e92e189536d043eead09f9c77989
+            throw new Exception('Delete function cannot be used within a subquery context.');
         }
 
         $table = self::$prefix . $tableName;
@@ -964,7 +972,9 @@ class MysqliDb
         $this->count = $stmt->affected_rows;
         $this->reset();
 
-        return ($stmt->affected_rows > -1);	//	-1 indicates that the query returned an error
+        // return ($stmt->affected_rows > -1);	//	-1 indicates that the query returned an error
+        // https://github.com/ThingEngineer/PHP-MySQLi-Database-Class/pull/1017/commits/28ca0226f213e1859cc60bd51643fa3ca665a7c9
+        return ($stmt->affected_rows >= 0); // anything greater than -1 indicates success
     }
 
     /**
@@ -1689,7 +1699,12 @@ class MysqliDb
             }
             $this->count++;
             if ($this->_mapKey) {
-                $results[$row[$this->_mapKey]] = count($row) > 2 ? $result : end($result);
+                if (count($row) < 3 && $this->returnType == 'object') {
+                    $res = new ArrayIterator($result);
+                    $res->seek($_res->count() - 1);
+                    $results[$row[$this->_mapKey]] = $res->current();
+                }
+                else $results[$row[$this->_mapKey]] = count($row) > 2 ? $result : end($result);
             } else {
                 array_push($results, $result);
             }
@@ -1852,7 +1867,9 @@ class MysqliDb
         $dataColumns = array_keys($tableData);
         if ($isInsert) {
             if (isset ($dataColumns[0]))
-                $this->_query .= ' (`' . implode('`, `', $dataColumns) . '`) ';
+                // $this->_query .= ' (`' . implode('`, `', $dataColumns) . '`) ';
+                // https://github.com/ThingEngineer/PHP-MySQLi-Database-Class/issues/1019
+                $this->_query .= ' (' . implode(', ', $dataColumns) . ') ';
             $this->_query .= ' VALUES (';
         } else {
             $this->_query .= " SET ";
@@ -2329,7 +2346,7 @@ class MysqliDb
      *
      * @return MysqliDb
      */
-    public function setTrace($enabled, $stripPrefix = null)
+    public function setTrace($enabled, $stripPrefix = '')
     {
         $this->traceEnabled = $enabled;
         $this->traceStripPrefix = $stripPrefix;
@@ -2350,7 +2367,7 @@ class MysqliDb
         }
 
         return __CLASS__ . "->" . $caller["function"] . "() >>  file \"" .
-            str_replace($this->traceStripPrefix, '', $caller["file"]) . "\" line #" . $caller["line"] . " ";
+            str_replace($this->traceStripPrefix , '', $caller["file"]) . "\" line #" . $caller["line"] . " ";
     }
 
     /**
